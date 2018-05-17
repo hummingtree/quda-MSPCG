@@ -7,29 +7,25 @@
 #include <color_spinor_field.h>
 #include <vector>
 
+#include <invert_quda.h>
+
 namespace quda {
 
 	class MSPCG : public Solver { // Multisplitting Preconditioned CG
 	
 	private:
 		
-		const DiracMdagM &MdagM;
-		const DiracMdagM &MdagM_prec;
+		DiracMdagM* MdagM;
+		DiracMdagM* MdagM_prec;
 
 		Solver *solver_prec;
 		SolverParam solver_prec_param;
 		
-		int padding_size;
-
-		ColorSpinorField p;	
-		ColorSpinorField r;	
-		ColorSpinorField z;	
-		ColorSpinorField fz;	
-		ColorSpinorField fr;	
+		std::array<int, 4> R;
 
 	public:
 		
-		MSPCG(DiracMatrix& _mat, DiracMatrix& _mat_prec, SolverParam& _param, TimeProfile& profile);
+		MSPCG(QudaInvertParam* inv_param, SolverParam& _param, TimeProfile& profile, int ps=1);
 		
 		virtual ~MSPCG();
 
