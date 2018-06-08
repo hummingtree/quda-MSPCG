@@ -30,6 +30,7 @@ namespace quda {
 		virtual ~MSPCG();
 
 		void operator()(ColorSpinorField& out, ColorSpinorField& in);
+		void inner_cg(ColorSpinorField& ix, ColorSpinorField& ib);
 
 	};
 

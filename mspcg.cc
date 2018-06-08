@@ -55,7 +55,8 @@ namespace quda {
   // set the required parameters for the inner solver
   static void fillInnerSolverParam(SolverParam& inner, const SolverParam& outer)
   {
-    inner.tol = outer.tol_precondition;
+//    inner.tol = outer.tol_precondition;
+    inner.tol = 5e-2;
     inner.maxiter = outer.maxiter_precondition;
     inner.delta = 1e-20; // no reliable updates within the inner solver
     inner.precision = outer.precision_precondition; // preconditioners are uni-precision solvers
@@ -74,7 +75,11 @@ namespace quda {
   MSPCG::MSPCG(QudaInvertParam* inv_param, SolverParam& _param, TimeProfile& profile, int ps) :
     Solver(_param, profile), solver_prec(0), solver_prec_param(_param)
   { // note that for consistency will accept ONLY M and WILL promote that to MdagM.
-   
+  
+		// setVerbosity(QUDA_DEBUG_VERBOSE);
+
+		printfQuda("MSPCG constructor starts.\n");
+		
 		R.fill(ps);
 
 		if(inv_param->dslash_type != QUDA_MOBIUS_DWF_DSLASH){
@@ -83,29 +88,40 @@ namespace quda {
 
 		// create extended gauge field
 		// TODO: dynamical allocation need fix
-		cudaGaugeField* padded_gauge_field = createExtendedGauge(*gaugePrecondition, R.data(), profile, true, QUDA_RECONSTRUCT_INVALID);
+		if(not gaugePrecondition){
+			errorQuda("gaugePrecondition not valid.");
+		}
+
+		int gR[4] = {2*R[0], R[1], R[2], R[3]}; 
+		cudaGaugeField* padded_gauge_field_precondition = createExtendedGauge(*gaugePrecondition, gR, profile, true, QUDA_RECONSTRUCT_NO);
+		cudaGaugeField* padded_gauge_field = createExtendedGauge(*gaugePrecise, gR, profile, true, QUDA_RECONSTRUCT_NO);
 
 		DiracParam dirac_param;
 		setDiracParam(dirac_param, inv_param, true); // pc = true
-
-		DiracParam dirac_prec_param;
-		setDiracParam(dirac_prec_param, inv_param, true); // pc = true
 		dirac_prec_param.gauge = padded_gauge_field;
 
+		DiracParam dirac_param_precondition;
+		setDiracParam(dirac_prec_param, inv_param, true); // pc = true
+		dirac_prec_param.gauge = padded_gauge_field_precondition;
+
 		for(int i = 0; i < 4; i++){
-			dirac_prec_param.commDim[i] = 0;
+			dirac_param.commDim[i] = 1;
+			dirac_param_precondition.commDim[i] = 0;
 		}
 
 		Dirac* mat = Dirac::create(dirac_param);
-		Dirac* mat_prec = Dirac::create(dirac_prec_param);
+		Dirac* mat_precondition = Dirac::create(dirac_param_precondition);
+		dirac_param.print();
+		dirac_param_precondition.print();
 
 		MdagM = new DiracMdagM(mat);
-		MdagM_prec = new DiracMdagM(mat_prec);
-
+		MdagM_prec = new DiracMdagM(mat_precondition);
 		
 		fillInnerSolverParam(solver_prec_param, param);
     
 		solver_prec = new CG(*MdagM_prec, *MdagM_prec, solver_prec_param, profile);
+	
+		printfQuda("MSPCG constructor ends.\n");
 	
 	}
 
@@ -115,11 +131,51 @@ namespace quda {
     if(solver_prec) delete solver_prec;
 
 		delete MdagM;
-		delete MdagM_prec;
+		// delete MdagM_prec;
 
     profile.TPSTOP(QUDA_PROFILE_FREE);
   }
 
+	void MSPCG::inner_cg(ColorSpinorField& ix, ColorSpinorField& ib)
+	{
+		commGlobalReductionSet(false);
+		
+		blas::zero(ix);
+		static cudaColorSpinorField immp(ib);
+		static cudaColorSpinorField ir(ib);
+		static cudaColorSpinorField ip(ib);
+		static cudaColorSpinorField itmp(ib);
+	
+		double rk2 = blas::norm2(ir);
+		double Mpk2, MdagMpk2, alpha, beta, rkp12;
+
+		printfQuda("inner_cg: before starting: r2 = %8.4e \n", rk2);
+
+		for(int local_loop_count = 0; local_loop_count < 10; local_loop_count++){
+			(*MdagM_prec)(immp, ip, itmp);
+			//zero_boundary_fermion(eg, mmp);
+      Mpk2 = reDotProduct(ip, immp);
+      MdagMpk2 = blas::norm2(immp); // Dag yes, (Mdag * M * p_k, Mdag * M * p_k)
+
+      alpha = rk2 / Mpk2; 
+
+			axpy(alpha, ip, ix);
+			axpy(-alpha, immp, ir);
+		
+			rkp12 = blas::norm2(ir);
+
+			beta = rkp12 / rk2;
+			rk2 = rkp12;
+	
+			xpay(ir, beta, ip);
+        
+      printfQuda("inner_cg: l.i. #%04d: r2 = %8.4e alpha = %8.4e beta = %8.4e Mpk2 = %8.4e\n",
+      						local_loop_count, rk2, alpha, beta, Mpk2);
+		}
+
+		commGlobalReductionSet(true);
+		return;
+	}
 
   void MSPCG::operator()(ColorSpinorField& x, ColorSpinorField& b)
   {
@@ -137,63 +193,102 @@ namespace quda {
 
     int k = 0;
 
+		blas::zero(x);
+
 		int parity = MdagM->getMatPCType();
 
 		ColorSpinorParam csParam(b);
 		csParam.create = QUDA_ZERO_FIELD_CREATE;
 		// TODO: def
-    cudaColorSpinorField r(b, csParam);
-    cudaColorSpinorField tmp(b, csParam);
-    cudaColorSpinorField mmp(b, csParam);
-    cudaColorSpinorField z(b, csParam);
-		
+    cudaColorSpinorField* rr = NULL;
+    cudaColorSpinorField* tmp = NULL;
+    cudaColorSpinorField* mmp = NULL;
+    cudaColorSpinorField* z = NULL;
+    cudaColorSpinorField* p = NULL;
+	
 		cudaColorSpinorField* fr = NULL;
 		cudaColorSpinorField* fz = NULL;
 
-		for(int i=0; i<4; ++i) csParam.x[i] += 2*R[i];
-		// TODO: def
-		fr = new cudaColorSpinorField(csParam);
-		fz = new cudaColorSpinorField(csParam);
-		
-		(*MdagM)(r, x, tmp); // r = MdagM * x
-    double r2 = xmyNorm(b, r); // r = b - MdagM * x
-
-		// z = M^-1 r
-		copyExtendedColorSpinor(*fr, r, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
-    (*solver_prec)(*fz, *fr);
-		copyExtendedColorSpinor(z, *fz, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
-
-		// TODO: def
-		cudaColorSpinorField p(z);
+		for(int i=0; i<4; ++i){
+			csParam.x[i] += 2*R[i];
+		}
+		printfQuda("[%d %d %d %d %d]\n", csParam.x[0], csParam.x[1], csParam.x[2], csParam.x[3], csParam.x[4]);
 	
+		csParam.print();
+
+		csParam.setPrecision(QUDA_DOUBLE_PRECISION);
+		// TODO: def
+		fr  = new cudaColorSpinorField(csParam);
+		fz  = new cudaColorSpinorField(csParam);
+	
+		rr  = new cudaColorSpinorField(csParam);
+    tmp = new cudaColorSpinorField(csParam);
+    mmp = new cudaColorSpinorField(csParam);
+    z   = new cudaColorSpinorField(csParam);
+    p   = new cudaColorSpinorField(csParam);
+		
+//		(*MdagM)(*rr, x, *tmp); // r = MdagM * x
+//    double rr2 = xmyNorm(b, *rr); // r = b - MdagM * x
+	
+    profile.TPSTOP(QUDA_PROFILE_INIT);
+
+		printfQuda("initial r2/b2: %8.4e/%8.4e.\n", rr2, b2);
+		// z = M^-1 r
+		copyExtendedColorSpinor(*fr, *rr, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
+//    (*solver_prec)(*fz, *fr);
+	  blas::copy(*fz, *fr);
+		copyExtendedColorSpinor(*z, *fz, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
+
+		blas::copy(*z, *rr);
+
+		double z2 = blas::norm2(*z);
+		printfQuda("initial z2 = %8.4e.\n", z2);
+
+    profile.TPSTART(QUDA_PROFILE_COMPUTE);
+		// TODO: def
+		blas::copy(*p, *z);
+		
 		double alpha, beta, rkzk, pkApk, zkP1rkp1, zkrk;
 
 		double stop = stopping(param.tol, b2, param.residual_type);
     // TODO: need to fix this heavy quear residual bla bla ...
-		while(!convergence(r2, 0., stop, param.tol_hq) && k < param.maxiter){
+//		while( r2>stop && k < param.maxiter ){
+//		while( k < param.maxiter ){
+		while( k < 1 ){
 			
-			rkzk = reDotProduct(r, z);
-			(*MdagM)(mmp, p, tmp);
-			pkApk = reDotProduct(p, mmp);
+			rkzk = reDotProduct(*rr, *z);
+			(*MdagM)(*mmp, *p, *tmp);
+			pkApk = reDotProduct(*p, *mmp);
 			alpha = rkzk / pkApk;
 
-			axpy(alpha, p, x); // x_k+1 = x_k + alpha * p_k
-			axpy(-alpha, mmp, r); // r_k+1 = r_k - alpha * Ap_k
+			axpy(alpha, *p, x); // x_k+1 = x_k + alpha * p_k
+			axpy(-alpha, *mmp, *rr); // r_k+1 = r_k - alpha * Ap_k
 			
+    	profile.TPSTOP(QUDA_PROFILE_COMPUTE);
 			// z = M^-1 r
-			copyExtendedColorSpinor(*fr, r, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
-	    (*solver_prec)(*fz, *fr);
-			copyExtendedColorSpinor(z, *fz, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
-
-			zkP1rkp1 = reDotProduct(z, r);
-			beta = zkP1rkp1 / rkzk;
-			xpay(z, beta, p);
+			blas::zero(*fr);
+			copyExtendedColorSpinor(*fr, *rr, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
+//			blas::copy(*fr, *rr);
+			double fr2 = blas::norm2(*fr);
+//	  (*solver_prec)(*fz, *fr);
+	    blas::copy(*fz, *fr);
+			blas::zero(*z);
+			copyExtendedColorSpinor(*z, *fz, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
+			double fz2 = blas::norm2(*fz);
+//			blas::copy(*z, *rr);
+			z2 = blas::norm2(*z);
+			profile.TPSTART(QUDA_PROFILE_COMPUTE);
 			
-			r2 = blas::norm2(r);
+			zkP1rkp1 = reDotProduct(*z, *rr);
+			beta = zkP1rkp1 / rkzk;
+			xpay(*z, beta, *p);
+			
+			rr2 = blas::norm2(*rr);
+			printfQuda("z2/fz2/r2/fr2: %8.4e/%8.4e/%8.4e/%8.4e\n", z2, fz2, rr2, fr2);
       
 			++k;
-      PrintStats("MSPCG", k, r2, b2, 0.);
-
+      // PrintStats("MSPCG", k, r2, b2, 0.);
+			printfQuda("MSPCG/iter.count/r2/target_r2/%%/target_%%: %05d %8.4e %8.4e %8.4e %8.4e\n", k, rr2, stop, std::sqrt(rr2/b2), param.tol);
 		}
     
 		profile.TPSTOP(QUDA_PROFILE_COMPUTE);
@@ -208,8 +303,8 @@ namespace quda {
       warningQuda("Exceeded maximum iterations %d", param.maxiter);
 
     // compute the true residual 
-    (*MdagM)(r, x, tmp);
-    double true_res = xmyNorm(b, r);
+    (*MdagM)(*rr, x, *tmp);
+    double true_res = xmyNorm(b, *rr);
     param.true_res = sqrt(true_res/b2);
 
     // reset the flops counters
@@ -220,6 +315,12 @@ namespace quda {
     profile.TPSTOP(QUDA_PROFILE_EPILOGUE);
     profile.TPSTART(QUDA_PROFILE_FREE);
 
+		delete rr  ;
+    delete tmp ;
+    delete mmp ;
+    delete z   ;
+    delete p   ;
+	
     profile.TPSTOP(QUDA_PROFILE_FREE);
     return;
   }

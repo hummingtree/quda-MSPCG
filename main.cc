@@ -72,6 +72,8 @@ using namespace quda;
 
 quda::cudaGaugeField* checkGauge(QudaInvertParam *param);
 
+extern quda::cudaGaugeField* gaugePrecise;
+
 //!< Profiler for invertQuda
 static TimeProfile profileInvert("invertQuda");
 
@@ -109,7 +111,7 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
 
   profileInvert.TPSTART(QUDA_PROFILE_TOTAL);
 
-  if (!initialized) errorQuda("QUDA not initialized");
+//  if (!initialized) errorQuda("QUDA not initialized");
 
 	printQudaInvertParam(param);
 
@@ -117,6 +119,7 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
 
   // check the gauge fields have been created
   cudaGaugeField *cudaGauge = checkGauge(param);
+//  cudaGaugeField *cudaGauge = gaugePrecise;
 
   // It was probably a bad design decision to encode whether the system is even/odd preconditioned (PC) in
   // solve_type and solution_type, rather than in separate members of QudaInvertParam.  We're stuck with it
@@ -142,7 +145,7 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
     param->spinorGiB *= (param->inv_type == QUDA_CG_INVERTER ? 8 : 9)/(double)(1<<30);
   }
 
-  param->secs = 0;
+	param->secs = 0;
   param->gflops = 0;
   param->iter = 0;
 
@@ -163,10 +166,13 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
   cpuParam.location = param->output_location;
   ColorSpinorField *h_x = ColorSpinorField::Create(cpuParam);
 
-  // download source
+	// download source
   ColorSpinorParam cudaParam(cpuParam, *param);
   cudaParam.create = QUDA_COPY_FIELD_CREATE;
   b = new cudaColorSpinorField(*h_b, cudaParam);
+
+	cudaParam.create = QUDA_NULL_FIELD_CREATE;
+	x = new cudaColorSpinorField(cudaParam);
 
   blas::zero(*x);
 
@@ -228,7 +234,7 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
 
   profileInvert.TPSTOP(QUDA_PROFILE_FREE);
 
-  popVerbosity();
+//  popVerbosity();
 
   // cache is written out even if a long benchmarking job gets interrupted
   saveTuneCache();
@@ -396,7 +402,7 @@ int main(int argc, char **argv)
   inv_param.precondition_cycle = 1;
   inv_param.tol_precondition = 1e-1;
   inv_param.maxiter_precondition = 10;
-  inv_param.verbosity_precondition = QUDA_SILENT;
+  inv_param.verbosity_precondition = QUDA_DEBUG_VERBOSE;
   inv_param.cuda_prec_precondition = cuda_prec_precondition;
   inv_param.omega = 1.0;
 
@@ -435,7 +441,7 @@ int main(int argc, char **argv)
     inv_param.clover_coeff = clover_coeff;
   }
 
-  inv_param.verbosity = QUDA_VERBOSE;
+  inv_param.verbosity = QUDA_DEBUG_VERBOSE;
 
   // *** Everything between here and the call to initQuda() is
   // *** application-specific.
@@ -532,9 +538,8 @@ int main(int argc, char **argv)
   if (multishift) {
     invertMultiShiftQuda(spinorOutMulti, spinorIn, &inv_param);
   } else {
-    invertQuda(spinorOut, spinorIn, &inv_param);
-  	
-	
+    // invertQuda(spinorOut, spinorIn, &inv_param);
+    invert_MSPCG(spinorOut, spinorIn, &inv_param);
 	}
 
   // stop the timer
