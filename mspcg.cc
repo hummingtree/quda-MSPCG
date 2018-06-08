@@ -106,12 +106,12 @@ namespace quda {
 		dirac_param_precondition.gauge = padded_gauge_field_precondition;
 
 		for(int i = 0; i < 4; i++){
-			dirac_param.commDim[i] = 1;
+			dirac_param.commDim[i] = 0;
 			dirac_param_precondition.commDim[i] = 0;
 		}
 
 		mat = Dirac::create(dirac_param);
-		Dirac* mat_precondition = Dirac::create(dirac_param_precondition);
+		mat_precondition = Dirac::create(dirac_param_precondition);
 		dirac_param.print();
 		dirac_param_precondition.print();
 
@@ -240,8 +240,6 @@ namespace quda {
 
 		csParam.setPrecision(QUDA_DOUBLE_PRECISION);
 		// TODO: def
-		fr  = new cudaColorSpinorField(csParam);
-		fz  = new cudaColorSpinorField(csParam);
 		fx  = new cudaColorSpinorField(csParam);
 		fb  = new cudaColorSpinorField(csParam);
 		
@@ -251,7 +249,18 @@ namespace quda {
 		double fb2 = norm2(*fb);
 		printfQuda("Test fx**2/fb**2 = %16.12e/%16.12e.\n", fx2, fb2);
 		blas::zero(*fx);
-	
+
+		csParam.setPrecision(QUDA_HALF_PRECISION);
+		// TODO: def
+		fr  = new cudaColorSpinorField(csParam);
+		fz  = new cudaColorSpinorField(csParam);
+		
+		copyExtendedColorSpinor(*fr, b, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
+		((DiracMobius*)mat_precondition)->Dslash4pre(*fz, *fr, QUDA_EVEN_PARITY);
+		double sfz2 = norm2(*fz);
+		double sfr2 = norm2(*fr);
+		printfQuda("Test sfz**2/sfr**2 = %16.12e/%16.12e.\n", sfz2, sfr2);
+
 		(*MdagM)(*rr, x, *tmp); // r = MdagM * x
     double rr2 = xmyNorm(b, *rr); // r = b - MdagM * x
 	
