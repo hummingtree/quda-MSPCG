@@ -15,6 +15,7 @@ namespace quda {
 	
 	private:
 		
+		Dirac* mat;
 		DiracMdagM* MdagM;
 		DiracMdagM* MdagM_prec;
 
