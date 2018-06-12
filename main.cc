@@ -326,8 +326,10 @@ int main(int argc, char **argv)
     {
       // b5[k], c[k] values are chosen for arbitrary values,
       // but the difference of them are same as 1.0
-      inv_param.b_5[k] = 1.452;
-      inv_param.c_5[k] = 0.452;
+//      inv_param.b_5[k] = 1.452;
+      inv_param.b_5[k] = 1.;
+//      inv_param.c_5[k] = 0.452;
+      inv_param.c_5[k] = 0.;
     }
   }
 
@@ -451,6 +453,8 @@ int main(int argc, char **argv)
       dslash_type == QUDA_DOMAIN_WALL_4D_DSLASH ||
       dslash_type == QUDA_MOBIUS_DWF_DSLASH) {
     dw_setDims(gauge_param.X, inv_param.Ls);
+    int extended_size[4] = {28, 14, 14, 18};
+		//dw_setDims(extended_size, inv_param.Ls);
   } else {
     setDims(gauge_param.X);
   }
@@ -470,7 +474,7 @@ int main(int argc, char **argv)
     read_gauge_field(latfile, gauge, gauge_param.cpu_prec, gauge_param.X, argc, argv);
     construct_gauge_field(gauge, 2, gauge_param.cpu_prec, &gauge_param);
   } else { // else generate a random SU(3) field
-    construct_gauge_field(gauge, 1, gauge_param.cpu_prec, &gauge_param);
+    construct_gauge_field(gauge, 0, gauge_param.cpu_prec, &gauge_param);
   }
 
   if (dslash_type == QUDA_CLOVER_WILSON_DSLASH || dslash_type == QUDA_TWISTED_CLOVER_DSLASH) {
@@ -519,6 +523,7 @@ int main(int argc, char **argv)
   } else {
     //((double*)spinorIn)[0] = 1.0;
     for (int i=0; i<inv_param.Ls*V*spinorSiteSize; i++) ((double*)spinorIn)[i] = rand() / (double)RAND_MAX;
+    //for (int i=0; i<inv_param.Ls*V*spinorSiteSize; i++) ((double*)spinorIn)[i] = 1.;
   }
 
   // start the timer

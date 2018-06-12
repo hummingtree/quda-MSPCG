@@ -12,6 +12,8 @@
 
 #include <mspcg.h>
 
+#include <gauge_tools.h>
+
 extern quda::cudaGaugeField* gaugePrecondition;
 extern quda::cudaGaugeField* gaugePrecise;
 
@@ -94,8 +96,11 @@ namespace quda {
 		}
 
 		int gR[4] = {2*R[0], R[1], R[2], R[3]}; 
-		cudaGaugeField* padded_gauge_field_precondition = createExtendedGauge(*gaugePrecondition, gR, profile, true, QUDA_RECONSTRUCT_NO);
-		cudaGaugeField* padded_gauge_field = createExtendedGauge(*gaugePrecise, gR, profile, true, QUDA_RECONSTRUCT_NO);
+		cudaGaugeField* padded_gauge_field_precondition = createExtendedGauge(*gaugePrecondition, gR, profile, false, QUDA_RECONSTRUCT_NO);
+		cudaGaugeField* padded_gauge_field = createExtendedGauge(*gaugePrecise, gR, profile, false, QUDA_RECONSTRUCT_NO);
+
+		printfQuda( "Original gauge field = %16.12e\n", plaquette( *gaugePrecise, QUDA_CUDA_FIELD_LOCATION ).x );
+		printfQuda( "Extended gauge field = %16.12e\n", plaquette( *padded_gauge_field, QUDA_CUDA_FIELD_LOCATION ).x );
 
 		DiracParam dirac_param;
 		setDiracParam(dirac_param, inv_param, true); // pc = true
@@ -106,18 +111,19 @@ namespace quda {
 		dirac_param_precondition.gauge = padded_gauge_field_precondition;
 
 		for(int i = 0; i < 4; i++){
-			dirac_param.commDim[i] = 0;
+			dirac_param.commDim[i] = 1; 
+//			dirac_param.commDim[i] = 1; 
 			dirac_param_precondition.commDim[i] = 0;
 		}
 
 		mat = Dirac::create(dirac_param);
-		mat_precondition = Dirac::create(dirac_param_precondition);
+//		mat_precondition = Dirac::create(dirac_param_precondition);
 		dirac_param.print();
 		dirac_param_precondition.print();
 
 		MdagM = new DiracMdagM(mat);
-//		MdagM = mat;
-		MdagM_prec = new DiracMdagM(mat_precondition);
+		//		MdagM = mat;
+//		MdagM_prec = new DiracMdagM(mat_precondition);
 		
 		fillInnerSolverParam(solver_prec_param, param);
     
@@ -202,6 +208,7 @@ namespace quda {
 
 		ColorSpinorParam csParam(b);
 		csParam.create = QUDA_ZERO_FIELD_CREATE;
+		csParam.print();
 		// TODO: def
     cudaColorSpinorField* rr = NULL;
     cudaColorSpinorField* tmp = NULL;
@@ -223,6 +230,14 @@ namespace quda {
 		}
     b2 = norm2(b);
 		printfQuda("Test b2 after  = %16.12e.\n", b2);
+//		((DiracMobius*)mat)->Dslash4(x, b, QUDA_EVEN_PARITY);
+//		double x2 = blas::norm2(x);
+//		printfQuda("Test x**2/b**2 = %16.12e/%16.12e.\n", x2, b2);
+//		if( comm_rank() ){
+//			blas::zero(x);
+//		}
+//		x2 = blas::norm2(x);
+//		printfQuda("Test x**2/b**2 = %16.12e/%16.12e.\n", x2, b2);
 		/// --- 
 
 		cudaColorSpinorField* fr = NULL;
@@ -242,24 +257,43 @@ namespace quda {
 		// TODO: def
 		fx  = new cudaColorSpinorField(csParam);
 		fb  = new cudaColorSpinorField(csParam);
+		blas::zero(*fb);
+		blas::zero(*fx);
+	
 		
+		printfQuda(" b gamma basis = %d.\n", b.GammaBasis());
+		printfQuda("fb gamma basis = %d.\n", fb->GammaBasis());
+
 		copyExtendedColorSpinor(*fb, b, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
-		((DiracMobius*)mat)->Dslash4pre(*fx, *fb, QUDA_EVEN_PARITY);
+		((DiracMobius*)mat)->Dslash4(*fx, *fb, QUDA_EVEN_PARITY);
 		double fx2 = norm2(*fx);
 		double fb2 = norm2(*fb);
 		printfQuda("Test fx**2/fb**2 = %16.12e/%16.12e.\n", fx2, fb2);
+		zero_extended_color_spinor_interface( *fx, R, QUDA_CUDA_FIELD_LOCATION, 0);
+		fx2 = norm2(*fx);
+		printfQuda("Chopping   fx**2 = %16.12e.\n", fx2);
 		blas::zero(*fx);
 
 		csParam.setPrecision(QUDA_HALF_PRECISION);
+		csParam.print();
 		// TODO: def
 		fr  = new cudaColorSpinorField(csParam);
 		fz  = new cudaColorSpinorField(csParam);
+		blas::zero(*fr);
+		blas::zero(*fz);
 		
 		copyExtendedColorSpinor(*fr, b, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
-		((DiracMobius*)mat_precondition)->Dslash4pre(*fz, *fr, QUDA_EVEN_PARITY);
+		((DiracMobius*)mat_precondition)->Dslash4(*fz, *fr, QUDA_EVEN_PARITY);
 		double sfz2 = norm2(*fz);
 		double sfr2 = norm2(*fr);
 		printfQuda("Test sfz**2/sfr**2 = %16.12e/%16.12e.\n", sfz2, sfr2);
+		zero_extended_color_spinor_interface( *fz, R, QUDA_CUDA_FIELD_LOCATION, 0);
+		zero_extended_color_spinor_interface( *fz, R, QUDA_CUDA_FIELD_LOCATION, 0);
+		zero_extended_color_spinor_interface( *fz, R, QUDA_CUDA_FIELD_LOCATION, 0);
+		zero_extended_color_spinor_interface( *fz, R, QUDA_CUDA_FIELD_LOCATION, 0);
+		sfz2 = norm2(*fz);
+		printfQuda("Chopping    sfz**2 = %16.12e.\n", sfz2);
+		blas::zero(*fx);
 
 		(*MdagM)(*rr, x, *tmp); // r = MdagM * x
     double rr2 = xmyNorm(b, *rr); // r = b - MdagM * x
