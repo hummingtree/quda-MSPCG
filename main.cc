@@ -80,46 +80,46 @@ static TimeProfile profileInvert("invertQuda");
 static bool initialized = false;
 static bool comms_initialized = false;
 
-void
+  void
 display_test_info()
 {
   printfQuda("running the following test:\n");
-    
+
   printfQuda("prec    prec_sloppy   multishift  matpc_type  recon  recon_sloppy S_dimension T_dimension Ls_dimension   dslash_type  normalization\n");
   printfQuda("%6s   %6s          %d     %12s     %2s     %2s         %3d/%3d/%3d     %3d         %2d       %14s  %8s\n",
-	     get_prec_str(prec),get_prec_str(prec_sloppy), multishift, get_matpc_str(matpc_type), 
-	     get_recon_str(link_recon), 
-	     get_recon_str(link_recon_sloppy),  
-	     xdim, ydim, zdim, tdim, Lsdim, 
-	     get_dslash_str(dslash_type), 
-	     get_mass_normalization_str(normalization));     
+      get_prec_str(prec),get_prec_str(prec_sloppy), multishift, get_matpc_str(matpc_type), 
+      get_recon_str(link_recon), 
+      get_recon_str(link_recon_sloppy),  
+      xdim, ydim, zdim, tdim, Lsdim, 
+      get_dslash_str(dslash_type), 
+      get_mass_normalization_str(normalization));     
 
   printfQuda("Grid partition info:     X  Y  Z  T\n"); 
   printfQuda("                         %d  %d  %d  %d\n", 
-	     dimPartitioned(0),
-	     dimPartitioned(1),
-	     dimPartitioned(2),
-	     dimPartitioned(3)); 
-  
+      dimPartitioned(0),
+      dimPartitioned(1),
+      dimPartitioned(2),
+      dimPartitioned(3)); 
+
   return ;
-  
+
 }
 
 void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
 {
-	setKernelPackT(true);
+  setKernelPackT(true);
 
   profileInvert.TPSTART(QUDA_PROFILE_TOTAL);
 
-//  if (!initialized) errorQuda("QUDA not initialized");
+  //  if (!initialized) errorQuda("QUDA not initialized");
 
-	printQudaInvertParam(param);
+  printQudaInvertParam(param);
 
-//  checkInvertParam(param);
+  //  checkInvertParam(param);
 
   // check the gauge fields have been created
   cudaGaugeField *cudaGauge = checkGauge(param);
-//  cudaGaugeField *cudaGauge = gaugePrecise;
+  //  cudaGaugeField *cudaGauge = gaugePrecise;
 
   // It was probably a bad design decision to encode whether the system is even/odd preconditioned (PC) in
   // solve_type and solution_type, rather than in separate members of QudaInvertParam.  We're stuck with it
@@ -145,7 +145,7 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
     param->spinorGiB *= (param->inv_type == QUDA_CG_INVERTER ? 8 : 9)/(double)(1<<30);
   }
 
-	param->secs = 0;
+  param->secs = 0;
   param->gflops = 0;
   param->iter = 0;
 
@@ -166,13 +166,13 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
   cpuParam.location = param->output_location;
   ColorSpinorField *h_x = ColorSpinorField::Create(cpuParam);
 
-	// download source
+  // download source
   ColorSpinorParam cudaParam(cpuParam, *param);
   cudaParam.create = QUDA_COPY_FIELD_CREATE;
   b = new cudaColorSpinorField(*h_b, cudaParam);
 
-	cudaParam.create = QUDA_NULL_FIELD_CREATE;
-	x = new cudaColorSpinorField(cudaParam);
+  cudaParam.create = QUDA_NULL_FIELD_CREATE;
+  x = new cudaColorSpinorField(cudaParam);
 
   blas::zero(*x);
 
@@ -187,27 +187,27 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
   printfQuda("Source: CPU = %g, CUDA copy = %g\n", nh_b, nb);
   printfQuda("Solution: CPU = %g, CUDA copy = %g\n", nh_x, nx);
 
-	in = b;
-	out = x;
+  in = b;
+  out = x;
 
   double nin = blas::norm2(*in);
   double nout = blas::norm2(*out);
   printfQuda("Prepared source = %g\n", nin);
   printfQuda("Prepared solution = %g\n", nout);
 
-// Solver *solve = Solver::create(solverParam, m, mSloppy, mPre, profileInvert);
-// (*solve)(*out, *in);
-// solverParam.updateInvertParam(*param);
-// delete solve;
+  // Solver *solve = Solver::create(solverParam, m, mSloppy, mPre, profileInvert);
+  // (*solve)(*out, *in);
+  // solverParam.updateInvertParam(*param);
+  // delete solve;
 
-	SolverParam solverParam(*param);
+  SolverParam solverParam(*param);
 
-	MSPCG* mspcg = new MSPCG(param, solverParam, profileInvert);
-	(*mspcg)(*out, *in);
-	solverParam.updateInvertParam(*param);
-	delete mspcg;
-  
-	nx = blas::norm2(*x);
+  MSPCG* mspcg = new MSPCG(param, solverParam, profileInvert);
+  (*mspcg)(*out, *in);
+  solverParam.updateInvertParam(*param);
+  delete mspcg;
+
+  nx = blas::norm2(*x);
   printfQuda("Solution = %g\n",nx);
 
   profileInvert.TPSTART(QUDA_PROFILE_EPILOGUE);
@@ -223,8 +223,8 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
   nx = blas::norm2(*x);
   nh_x = blas::norm2(*h_x);
   printfQuda("Reconstructed: CUDA solution = %g, CPU copy = %g\n", nx, nh_x);
-  
-	profileInvert.TPSTOP(QUDA_PROFILE_EPILOGUE);
+
+  profileInvert.TPSTOP(QUDA_PROFILE_EPILOGUE);
 
   profileInvert.TPSTART(QUDA_PROFILE_FREE);
 
@@ -235,7 +235,7 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
 
   profileInvert.TPSTOP(QUDA_PROFILE_FREE);
 
-//  popVerbosity();
+  //  popVerbosity();
 
   // cache is written out even if a long benchmarking job gets interrupted
   saveTuneCache();
@@ -273,7 +273,7 @@ int main(int argc, char **argv)
 
   QudaGaugeParam gauge_param = newQudaGaugeParam();
   QudaInvertParam inv_param = newQudaInvertParam();
- 
+
   double kappa5;
 
   gauge_param.X[0] = xdim;
@@ -286,7 +286,7 @@ int main(int argc, char **argv)
   gauge_param.type = QUDA_WILSON_LINKS;
   gauge_param.gauge_order = QUDA_QDP_GAUGE_ORDER;
   gauge_param.t_boundary = QUDA_PERIODIC_T;
-  
+
   gauge_param.cpu_prec = cpu_prec;
   gauge_param.cuda_prec = cuda_prec;
   gauge_param.reconstruct = link_recon;
@@ -303,7 +303,7 @@ int main(int argc, char **argv)
   inv_param.kappa = 1.0 / (2.0 * (1 + 3/gauge_param.anisotropy + mass));
 
   if ( dslash_type != QUDA_MOBIUS_DWF_DSLASH ) printfQuda("ERROR: NOR Mobius?\n");
-  
+
   inv_param.m5 = -1.8;
   kappa5 = 0.5/(5 + inv_param.m5);  
   inv_param.Ls = Lsdim;
@@ -335,7 +335,7 @@ int main(int argc, char **argv)
     errorQuda("qudaInvert: requesting zero residual\n");
     exit(1);
   }
-  
+
   // require both L2 relative and heavy quark residual to determine convergence
   inv_param.residual_type = static_cast<QudaResidualType_s>(0);
   inv_param.residual_type = (tol != 0) ? static_cast<QudaResidualType_s> ( inv_param.residual_type | QUDA_L2_RELATIVE_RESIDUAL) : inv_param.residual_type;
@@ -356,7 +356,7 @@ int main(int argc, char **argv)
 
   // domain decomposition preconditioner parameters
   inv_param.inv_type_precondition = precon_type;
-    
+
   inv_param.schwarz_type = QUDA_ADDITIVE_SCHWARZ;
   inv_param.precondition_cycle = 1;
   inv_param.tol_precondition = 1e-1;
@@ -425,17 +425,17 @@ int main(int argc, char **argv)
 
   memset(spinorIn, 0, inv_param.Ls*V*spinorSiteSize*sSize);
   memset(spinorCheck, 0, inv_param.Ls*V*spinorSiteSize*sSize);
-   
+
   memset(spinorOut, 0, inv_param.Ls*V*spinorSiteSize*sSize);
 
   // create a point source at 0 (in each subvolume...  FIXME)
-  
+
   if (inv_param.cpu_prec == QUDA_SINGLE_PRECISION) {
     for (int i=0; i<inv_param.Ls*V*spinorSiteSize; i++) ((float*)spinorIn)[i] = rand() / (float)RAND_MAX;
   }else{
-//    for (int i=0; i<inv_param.Ls*V*spinorSiteSize; i++) ((double*)spinorIn)[i] = rand() / (double)RAND_MAX;
+    //    for (int i=0; i<inv_param.Ls*V*spinorSiteSize; i++) ((double*)spinorIn)[i] = rand() / (double)RAND_MAX;
     for (int i=0; i<inv_param.Ls*V*spinorSiteSize; i++) ((double*)spinorIn)[i] = double(i%23);
-//    for (int i=0; i<inv_param.Ls*V*spinorSiteSize; i++) ((double*)spinorIn)[i] = 1.;
+    //    for (int i=0; i<inv_param.Ls*V*spinorSiteSize; i++) ((double*)spinorIn)[i] = 1.;
   }
 
   // start the timer
@@ -456,9 +456,9 @@ int main(int argc, char **argv)
 
   printfQuda("Device memory used:\n   Spinor: %f GiB\n    Gauge: %f GiB\n", 
       inv_param.spinorGiB, gauge_param.gaugeGiB);
-  
+
   printfQuda("\nDone: %i iter / %g secs = %g Gflops, total time = %g secs\n", 
-	  inv_param.iter, inv_param.secs, inv_param.gflops/inv_param.secs, time0);
+      inv_param.iter, inv_param.secs, inv_param.gflops/inv_param.secs, time0);
 
   void *spinorTmp = malloc(V*spinorSiteSize*sSize*inv_param.Ls);
 
@@ -474,7 +474,7 @@ int main(int argc, char **argv)
   mdw_matpc(spinorCheck, gauge, spinorTmp, kappa_b, kappa_c, inv_param.matpc_type, 1, inv_param.cpu_prec, gauge_param, inv_param.mass, inv_param.b_5, inv_param.c_5);
   free(kappa_b);
   free(kappa_c);
-  
+
   int vol = inv_param.solution_type == QUDA_MAT_SOLUTION ? V : Vh;
   mxpy(spinorIn, spinorCheck, vol*spinorSiteSize*inv_param.Ls, inv_param.cpu_prec);
   double nrm2 = norm_2(spinorCheck, vol*spinorSiteSize*inv_param.Ls, inv_param.cpu_prec);
@@ -482,7 +482,7 @@ int main(int argc, char **argv)
   double l2r = sqrt(nrm2 / src2);
 
   printfQuda("Residuals: (L2 relative) tol %g, QUDA = %g, host = %g; (heavy-quark) tol %g, QUDA = %g\n",
-       inv_param.tol, inv_param.true_res, l2r, inv_param.tol_hq, inv_param.true_res_hq);
+      inv_param.tol, inv_param.true_res, l2r, inv_param.tol_hq, inv_param.true_res_hq);
 
   freeGaugeQuda();
 

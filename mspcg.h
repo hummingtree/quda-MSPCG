@@ -12,55 +12,55 @@
 
 namespace quda {
 
-	class MSPCG : public Solver { // Multisplitting Preconditioned CG
-	
-	private:
-		
-		DiracMobiusPC* mat;
-		DiracMobiusPC* mat_precondition;
-//		DiracDubiusPC* mat_extended;
-		DiracMdagM* MdagM;
-		DiracMdagM* MdagM_precondition;
+  class MSPCG : public Solver { // Multisplitting Preconditioned CG
 
-		DiracParam dirac_param;
-		DiracParam dirac_param_precondition;
+    private:
 
-    cudaGaugeField* padded_gauge_field_precondition;
-    cudaGaugeField* padded_gauge_field;
+      DiracMobiusPC* mat;
+      DiracMobiusPC* mat_precondition;
+      //    DiracDubiusPC* mat_extended;
+      DiracMdagM* MdagM;
+      DiracMdagM* MdagM_precondition;
 
-		Solver *solver_prec;
-		SolverParam solver_prec_param;
-		
-		std::array<int, 4> R;
+      DiracParam dirac_param;
+      DiracParam dirac_param_precondition;
 
-    cudaColorSpinorField* r;
-    cudaColorSpinorField* p;
-    cudaColorSpinorField* z;
-    cudaColorSpinorField* mmp;
-    cudaColorSpinorField* tmp;
-	
-    cudaColorSpinorField* fr;
-    cudaColorSpinorField* fz;
-	
-    cudaColorSpinorField* immp;
-    cudaColorSpinorField* ip;
-    cudaColorSpinorField* itmp;
+      cudaGaugeField* padded_gauge_field_precondition;
+      cudaGaugeField* padded_gauge_field;
 
-	public:
-		
-		MSPCG(QudaInvertParam* inv_param, SolverParam& _param, TimeProfile& profile, int ps=1);
-    
-    double Gflops;
-    double fGflops;
+      Solver *solver_prec;
+      SolverParam solver_prec_param;
 
-    void test_dslash( const ColorSpinorField& tb );
+      std::array<int, 4> R;
 
-		virtual ~MSPCG();
+      cudaColorSpinorField* r;
+      cudaColorSpinorField* p;
+      cudaColorSpinorField* z;
+      cudaColorSpinorField* mmp;
+      cudaColorSpinorField* tmp;
 
-		void operator()(ColorSpinorField& out, ColorSpinorField& in);
-		void inner_cg(ColorSpinorField& ix, ColorSpinorField& ib);
+      cudaColorSpinorField* fr;
+      cudaColorSpinorField* fz;
 
-	};
+      cudaColorSpinorField* immp;
+      cudaColorSpinorField* ip;
+      cudaColorSpinorField* itmp;
+
+    public:
+
+      MSPCG(QudaInvertParam* inv_param, SolverParam& _param, TimeProfile& profile, int ps=1);
+
+      double Gflops;
+      double fGflops;
+
+      void test_dslash( const ColorSpinorField& tb );
+
+      virtual ~MSPCG();
+
+      void operator()(ColorSpinorField& out, ColorSpinorField& in);
+      void inner_cg(ColorSpinorField& ix, ColorSpinorField& ib);
+
+  };
 
 }
 
