@@ -6,7 +6,7 @@
 find_package(MPI)
 find_package(CUDA)
 
-set( QUDA_DIR "/home/jiquntu/quda-build/develop/build-mpi/" )
+set( QUDA_DIR "/home/jiquntu/quda-build/mspcg/build-mpi/" )
 
 include_directories( . "${QUDA_DIR}/include" ${MPI_INCLUDE_PATH} )
 link_directories( . "${QUDA_DIR}/lib")

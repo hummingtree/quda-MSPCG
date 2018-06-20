@@ -7,7 +7,6 @@
 #include <color_spinor_field.h>
 #include <blas_quda.h>
 #include <dslash_quda.h>
-#include <dslash_quda_dubius.h>
 #include <invert_quda.h>
 #include <util_quda.h>
 
@@ -109,8 +108,8 @@ namespace quda {
     padded_gauge_field_precondition = createExtendedGauge(*gaugePrecondition, gR, profile, true, QUDA_RECONSTRUCT_NO);
     comm_enable_peer2peer(p2p);
 
-    printfQuda( "Original gauge field = %16.12e\n", plaquette( *gaugePrecise, QUDA_CUDA_FIELD_LOCATION ).x );
-    printfQuda( "Extended gauge field = %16.12e\n", plaquette( *padded_gauge_field, QUDA_CUDA_FIELD_LOCATION ).x );
+//    printfQuda( "Original gauge field = %16.12e\n", plaquette( *gaugePrecise, QUDA_CUDA_FIELD_LOCATION ).x );
+//    printfQuda( "Extended gauge field = %16.12e\n", plaquette( *padded_gauge_field, QUDA_CUDA_FIELD_LOCATION ).x );
 
     //DiracParam dirac_param;
     setDiracParam(dirac_param, inv_param, true); // pc = true
@@ -127,6 +126,12 @@ namespace quda {
 
     dirac_param.print();
     dirac_param_precondition.print();
+    
+    mat = new DiracMobiusPC(dirac_param);
+    MdagM = new DiracMdagM(mat);
+    
+    mat_precondition = new DiracMobiusPC(dirac_param_precondition);
+    MdagM_precondition = new DiracMdagM(mat_precondition);
 
     fillInnerSolverParam(solver_prec_param, param);
 
@@ -149,6 +154,12 @@ namespace quda {
        if( mat_precondition )
        delete mat_precondition;
        */
+    delete MdagM_precondition;
+    delete mat_precondition;
+    
+    delete MdagM;
+    delete mat;
+
     delete padded_gauge_field;
     delete padded_gauge_field_precondition;
 
@@ -168,9 +179,6 @@ namespace quda {
     tt  = new cudaColorSpinorField(csParam);
     tb  = new cudaColorSpinorField(csParam);
 
-    mat = new DiracMobiusPC(dirac_param);
-    MdagM = new DiracMdagM(mat);
-
     blas::copy( *tb, b );
 
     double b2 = blas::norm2(*tb);
@@ -186,10 +194,7 @@ namespace quda {
     }
     x2 = blas::norm2(*tx);
     printfQuda("Chopping x2/b2 = %16.12e/%16.12e.\n", x2, b2);
-
-    delete MdagM;
-    delete mat;
-
+    
     cudaColorSpinorField* fx = NULL;
     cudaColorSpinorField* fb = NULL;
     cudaColorSpinorField* ft = NULL;
@@ -210,9 +215,6 @@ namespace quda {
 
     copyExtendedColorSpinor(*fb, *tb, QUDA_CUDA_FIELD_LOCATION, 0, NULL, NULL, NULL, NULL); // parity = 0
 
-    mat_precondition = new DiracMobiusPC(dirac_param_precondition);
-    MdagM_precondition = new DiracMdagM(mat_precondition);
-
     //    quda::pack::initConstants(*dirac_param_precondition.gauge, profile);
     double fb2 = norm2(*fb);
     (*MdagM_precondition)(*fx, *fb, *ft);
@@ -225,10 +227,7 @@ namespace quda {
     copyExtendedColorSpinor(*tx, *fx, QUDA_CUDA_FIELD_LOCATION, 0, NULL, NULL, NULL, NULL); // parity = 0
     double x2_ = blas::norm2(*tx);
     printfQuda("Rebuild     x2 = %16.12e.\n", x2_);
-    printfQuda("%% diff      x2 = %16.12e.\n", (x2-x2_)/x2);
-
-    delete MdagM_precondition;
-    delete mat_precondition;
+    printfQuda("%% diff      x2 = %16.12e (This number is SUPPOSED to be tiny).\n", (x2-x2_)/x2);
 
     delete tx;
     delete tt;
@@ -252,14 +251,11 @@ namespace quda {
     printfQuda("inner_cg: before starting: r2 = %8.4e \n", rk2);
     blas::copy(*ip, ib);
 
-    profile.TPSTART(QUDA_PROFILE_FREE);
-    mat_precondition = new DiracMobiusPC(dirac_param_precondition);
-    MdagM_precondition = new DiracMdagM(mat_precondition);
-    profile.TPSTOP(QUDA_PROFILE_FREE);
-
     for(int local_loop_count = 0; local_loop_count < 5; local_loop_count++){
       (*MdagM_precondition)(*immp, *ip, *itmp);
+      profile.TPSTART(QUDA_PROFILE_FREE);
       zero_extended_color_spinor_interface( *immp, R, QUDA_CUDA_FIELD_LOCATION, 0);
+      profile.TPSTOP(QUDA_PROFILE_FREE);
       //zero_boundary_fermion(eg, mmp);
       Mpk2 = reDotProduct(*ip, *immp);
 
@@ -280,13 +276,6 @@ namespace quda {
     }
 
     commGlobalReductionSet(true);
-
-    fGflops += MdagM_precondition->flops();
-
-    profile.TPSTART(QUDA_PROFILE_FREE);
-    delete MdagM_precondition;
-    delete mat_precondition;
-    profile.TPSTOP(QUDA_PROFILE_FREE);
 
     return;
   }
@@ -314,9 +303,9 @@ namespace quda {
     ColorSpinorParam csParam(b);
     csParam.create = QUDA_ZERO_FIELD_CREATE;
 
-    r  = new cudaColorSpinorField(csParam);
-    z  = new cudaColorSpinorField(csParam);
-    p  = new cudaColorSpinorField(csParam);
+    r  =   new cudaColorSpinorField(csParam);
+    z  =   new cudaColorSpinorField(csParam);
+    p  =   new cudaColorSpinorField(csParam);
     mmp  = new cudaColorSpinorField(csParam);
     tmp  = new cudaColorSpinorField(csParam);
 
@@ -325,12 +314,12 @@ namespace quda {
     }
     csParam.setPrecision(dirac_param_precondition.gauge->Precision());
 
-    fr  = new cudaColorSpinorField(csParam);
-    fz  = new cudaColorSpinorField(csParam);
+    fr  =  new cudaColorSpinorField(csParam);
+    fz  =  new cudaColorSpinorField(csParam);
 
-    immp= new cudaColorSpinorField(csParam);
-    ip  = new cudaColorSpinorField(csParam);
-    itmp= new cudaColorSpinorField(csParam);
+    immp=  new cudaColorSpinorField(csParam);
+    ip  =  new cudaColorSpinorField(csParam);
+    itmp=  new cudaColorSpinorField(csParam);
 
     blas::zero(*fr);
 
@@ -346,15 +335,9 @@ namespace quda {
 
     profile.TPSTART(QUDA_PROFILE_COMPUTE);
     // end of initializing.
-    mat = new DiracMobiusPC(dirac_param);
-    MdagM = new DiracMdagM(mat);
 
     (*MdagM)(*r, x, *tmp); // r = MdagM * x
     double r2 = xmyNorm(b, *r); // r = b - MdagM * x
-
-    Gflops += MdagM->flops();
-    delete MdagM;
-    delete mat;
 
     copyExtendedColorSpinor(*fr, *r, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
     inner_cg(*fz, *fr);
@@ -364,20 +347,10 @@ namespace quda {
     while( k < 50 ){
       rkzk = reDotProduct(*r, *z);
 
-      profile.TPSTART(QUDA_PROFILE_FREE);
-      mat = new DiracMobiusPC(dirac_param);
-      MdagM = new DiracMdagM(mat);
-      profile.TPSTOP(QUDA_PROFILE_FREE);
 
       (*MdagM)(*mmp, *p, *tmp);
       pkApk = reDotProduct(*p, *mmp);
       alpha = rkzk / pkApk;
-
-      Gflops += MdagM->flops();
-      profile.TPSTART(QUDA_PROFILE_FREE);
-      delete MdagM;
-      delete mat;
-      profile.TPSTOP(QUDA_PROFILE_FREE);
 
       axpy(alpha, *p, x); // x_k+1 = x_k + alpha * p_k
       axpy(-alpha, *mmp, *r); // r_k+1 = r_k - alpha * Ap_k
@@ -410,8 +383,8 @@ namespace quda {
     profile.TPSTART(QUDA_PROFILE_EPILOGUE);
 
     param.secs = profile.Last(QUDA_PROFILE_COMPUTE);
-    Gflops = Gflops*1e-9+blas::flops*1e-9;
-    fGflops = fGflops*1e-9+blas::flops*1e-9;
+    Gflops = MdagM->flops()*1e-9+blas::flops*1e-9;
+    fGflops = MdagM_precondition->flops()*1e-9+blas::flops*1e-9;
     param.gflops = Gflops;
     param.iter += k;
 
@@ -422,17 +395,12 @@ namespace quda {
       warningQuda("Exceeded maximum iterations %d", param.maxiter);
 
     // compute the true residual 
-    mat = new DiracMobiusPC(dirac_param);
-    MdagM = new DiracMdagM(mat);
 
     (*MdagM)(*r, x, *tmp);
     double true_res = xmyNorm(b, *r);
     param.true_res = sqrt(true_res/b2);
 
     true_res = blas::norm2(*r);
-
-    delete MdagM;
-    delete mat;
 
     printfQuda("True residual/target_r2: %8.4e/%8.4e.\n", true_res, stop);
     printfQuda("Performance outer: %8.4f TFLOPS.\n", Gflops*1e-3/param.secs);
