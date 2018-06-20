@@ -17,16 +17,19 @@ namespace quda {
     private:
 
       DiracMobiusPC* mat;
+      DiracMobiusPC* mat_sloppy;
       DiracMobiusPC* mat_precondition;
       //    DiracDubiusPC* mat_extended;
       DiracMdagM* MdagM;
+      DiracMdagM* MdagM_sloppy;
       DiracMdagM* MdagM_precondition;
 
       DiracParam dirac_param;
+      DiracParam dirac_param_sloppy;
       DiracParam dirac_param_precondition;
 
-      cudaGaugeField* padded_gauge_field_precondition;
       cudaGaugeField* padded_gauge_field;
+      cudaGaugeField* padded_gauge_field_precondition;
 
       Solver *solver_prec;
       SolverParam solver_prec_param;

@@ -19,6 +19,7 @@
 
 extern quda::cudaGaugeField* gaugePrecondition;
 extern quda::cudaGaugeField* gaugePrecise;
+extern quda::cudaGaugeField* gaugeSloppy;
 
 
 namespace quda {
@@ -103,29 +104,32 @@ namespace quda {
     }
 
     int gR[4] = {2*R[0], R[1], R[2], R[3]}; 
-    bool p2p = comm_peer2peer_enabled_global();
-    comm_enable_peer2peer(false); // The following function does NOT work with peer2peer comm
+//    bool p2p = comm_peer2peer_enabled_global();
+//    comm_enable_peer2peer(false); // The following function does NOT work with peer2peer comm
     padded_gauge_field = createExtendedGauge(*gaugePrecise, gR, profile, true, QUDA_RECONSTRUCT_NO);
     padded_gauge_field_precondition = createExtendedGauge(*gaugePrecondition, gR, profile, true, QUDA_RECONSTRUCT_NO);
-    comm_enable_peer2peer(p2p);
+//    comm_enable_peer2peer(p2p);
 
-    printfQuda( "Original gauge field = %16.12e\n", plaquette( *gaugePrecise, QUDA_CUDA_FIELD_LOCATION ).x );
-    printfQuda( "Extended gauge field = %16.12e\n", plaquette( *padded_gauge_field, QUDA_CUDA_FIELD_LOCATION ).x );
+//    printfQuda( "Original gauge field = %16.12e\n", plaquette( *gaugePrecise, QUDA_CUDA_FIELD_LOCATION ).x );
+//    printfQuda( "Extended gauge field = %16.12e\n", plaquette( *padded_gauge_field, QUDA_CUDA_FIELD_LOCATION ).x );
 
     //DiracParam dirac_param;
     setDiracParam(dirac_param, inv_param, true); // pc = true
 
-    //DiracParam dirac_param_precondition;
+    setDiracParam(dirac_param_sloppy, inv_param, true); // pc = true
+    dirac_param_precondition.gauge = gaugeSloppy;
+
     setDiracParam(dirac_param_precondition, inv_param, true); // pc = true
-    //    dirac_param_precondition.gauge = padded_gauge_field;
     dirac_param_precondition.gauge = padded_gauge_field_precondition;
 
     for(int i = 0; i < 4; i++){
       dirac_param.commDim[i] = 1; 
+      dirac_param_sloppy.commDim[i] = 1; 
       dirac_param_precondition.commDim[i] = 0;
     }
 
     dirac_param.print();
+    dirac_param_sloppy.print();
     dirac_param_precondition.print();
 
     fillInnerSolverParam(solver_prec_param, param);

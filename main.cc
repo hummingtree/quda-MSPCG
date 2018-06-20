@@ -27,6 +27,8 @@
 
 #include <mspcg.h>
 
+#include <qlat/qlat.h>
+
 // Wilson, clover-improved Wilson, twisted mass, and domain wall are supported.
 extern QudaDslashType dslash_type;
 
@@ -253,6 +255,15 @@ int main(int argc, char **argv)
     printfQuda("ERROR: Invalid option:%s\n", argv[i]);
     usage(argv);
   }
+
+// qlat initialization
+	qlat::Coordinate node_coor( commCoords(0), commCoords(1), commCoords(2), commCoords(3) );
+	qlat::Coordinate node_size( commDim(0), commDim(1), commDim(2), commDim(3) );
+	qlat::begin(qlat::index_from_coordinate(node_coor, node_size), node_size);
+	printf("Node #%03d(quda):%02dx%02dx%02dx%02d/#%03d(qlat):%02dx%02dx%02dx%02d.\n", comm_rank(), 
+				commCoords(0), commCoords(1), commCoords(2), commCoords(3), 
+				qlat::get_id_node(), qlat::get_coor_node()[0], qlat::get_coor_node()[1], qlat::get_coor_node()[2], qlat::get_coor_node()[3]);
+// END qlat initialization
 
   if (prec_sloppy == QUDA_INVALID_PRECISION) prec_sloppy = prec;
   if (prec_precondition == QUDA_INVALID_PRECISION) prec_precondition = prec_sloppy;
