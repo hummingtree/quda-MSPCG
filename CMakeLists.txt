@@ -6,8 +6,7 @@
 find_package(MPI)
 find_package(CUDA)
 
-set( QUDA_DIR "/home/jiquntu/quda-build/develop/build-mpi/" )
-set( QLAT_DIR "/home/jiquntu/qlat-build/1.0" )
+set( QUDA_DIR "/home/jiquntu/quda-build/mspcg/build-mpi/" )
 
 include_directories( . "${QUDA_DIR}/include" ${MPI_INCLUDE_PATH} "${QLAT_DIR}/include" "${QLAT_DIR}/include/utils" "${QLAT_DIR}/include/eigen3" )
 link_directories( . "${QUDA_DIR}/lib")

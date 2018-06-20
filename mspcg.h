@@ -4,7 +4,6 @@
 #include <quda.h>
 #include <quda_internal.h>
 #include <dirac_quda.h>
-#include <dirac_quda_dubius.h>
 #include <color_spinor_field.h>
 #include <vector>
 
