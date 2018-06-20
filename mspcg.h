@@ -34,6 +34,11 @@ namespace quda {
       SolverParam solver_prec_param;
 
       std::array<int, 4> R;
+      
+      cudaColorSpinorField* dr;
+      cudaColorSpinorField* dp;
+      cudaColorSpinorField* dmmp;
+      cudaColorSpinorField* dtmp;
 
       cudaColorSpinorField* r;
       cudaColorSpinorField* p;
@@ -60,8 +65,8 @@ namespace quda {
       virtual ~MSPCG();
 
       void operator()(ColorSpinorField& out, ColorSpinorField& in);
-      void inner_cg(ColorSpinorField& ix, ColorSpinorField& ib);
-
+      void inner_cg( ColorSpinorField& ix, ColorSpinorField& ib );
+      int  outer_cg( ColorSpinorField& dx, ColorSpinorField& db, double quit );
   };
 
 }
