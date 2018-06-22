@@ -19,9 +19,9 @@ namespace quda {
       DiracMobiusPC* mat_sloppy;
       DiracMobiusPC* mat_precondition;
       //    DiracDubiusPC* mat_extended;
-      DiracMdagM* MdagM;
-      DiracMdagM* MdagM_sloppy;
-      DiracMdagM* MdagM_precondition;
+      DiracMdagM* nrm_op;
+      DiracMdagM* nrm_op_sloppy;
+      DiracMdagM* nrm_op_precondition;
 
       DiracParam dirac_param;
       DiracParam dirac_param_sloppy;
@@ -35,12 +35,13 @@ namespace quda {
 
       std::array<int, 4> R;
       
-      cudaColorSpinorField* dr;
-      cudaColorSpinorField* dp;
-      cudaColorSpinorField* dmmp;
-      cudaColorSpinorField* dtmp;
+      cudaColorSpinorField* vct_dr;
+      cudaColorSpinorField* vct_dp;
+      cudaColorSpinorField* vct_dmmp;
+      cudaColorSpinorField* vct_dtmp;
 
       cudaColorSpinorField* r;
+      cudaColorSpinorField* x;
       cudaColorSpinorField* p;
       cudaColorSpinorField* z;
       cudaColorSpinorField* mmp;
@@ -53,6 +54,11 @@ namespace quda {
       cudaColorSpinorField* ip;
       cudaColorSpinorField* itmp;
 
+      Timer copier_timer;
+      Timer preconditioner_timer;
+      Timer sloppy_timer;
+      Timer precise_timer;
+  
     public:
 
       MSPCG(QudaInvertParam* inv_param, SolverParam& _param, TimeProfile& profile, int ps=1);

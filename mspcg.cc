@@ -78,10 +78,10 @@ namespace quda {
 
   MSPCG::MSPCG(QudaInvertParam* inv_param, SolverParam& _param, TimeProfile& profile, int ps) :
     Solver(_param, profile), solver_prec(0), solver_prec_param(_param), 
-    mat(NULL), MdagM(NULL), mat_precondition(NULL), MdagM_precondition(NULL),
+    mat(NULL), nrm_op(NULL), mat_precondition(NULL), nrm_op_precondition(NULL), mat_sloppy(NULL), nrm_op_sloppy(NULL),
     r(NULL), p(NULL), z(NULL), mmp(NULL), tmp(NULL), fr(NULL), fz(NULL), 
     immp(NULL), ip(NULL), itmp(NULL),
-    dr(NULL), dp(NULL), dmmp(NULL), dtmp(NULL)
+    vct_dr(NULL), vct_dp(NULL), vct_dmmp(NULL), vct_dtmp(NULL)
   { 
 
     printfQuda("MSPCG constructor starts.\n");
@@ -133,18 +133,22 @@ namespace quda {
     dirac_param_precondition.print();
     
     mat = new DiracMobiusPC(dirac_param);
-    MdagM = new DiracMdagM(mat);
+    nrm_op = new DiracMdagM(mat);
      
     mat_sloppy = new DiracMobiusPC(dirac_param_sloppy);
-    MdagM_sloppy = new DiracMdagM(mat_sloppy);
+    nrm_op_sloppy = new DiracMdagM(mat_sloppy);
     
     mat_precondition = new DiracMobiusPC(dirac_param_precondition);
-    MdagM_precondition = new DiracMdagM(mat_precondition);
+    nrm_op_precondition = new DiracMdagM(mat_precondition);
 
     fillInnerSolverParam(solver_prec_param, param);
 
     printfQuda("MSPCG constructor ends.\n");
-
+    
+    copier_timer.Reset("woo", "hoo", 0);
+    precise_timer.Reset("woo", "hoo", 0);
+    sloppy_timer.Reset("woo", "hoo", 0);
+    preconditioner_timer.Reset("woo", "hoo", 0);
   }
 
   MSPCG::~MSPCG(){
@@ -162,13 +166,13 @@ namespace quda {
        if( mat_precondition )
        delete mat_precondition;
        */
-    delete MdagM_precondition;
+    delete nrm_op_precondition;
     delete mat_precondition;
     
-    delete MdagM_sloppy;
+    delete nrm_op_sloppy;
     delete mat_sloppy;
     
-    delete MdagM;
+    delete nrm_op;
     delete mat;
 
     delete padded_gauge_field;
@@ -178,6 +182,7 @@ namespace quda {
   }
 
   void MSPCG::test_dslash( const ColorSpinorField& b ){
+    
     ColorSpinorParam csParam(b);
     csParam.create = QUDA_ZERO_FIELD_CREATE;
     csParam.print();
@@ -197,7 +202,7 @@ namespace quda {
     if( comm_rank() ){ blas::zero(*tb); }
     b2 = blas::norm2(*tb);
     printfQuda("Test b2 after  = %16.12e.\n", b2);
-    (*MdagM)(*tx, *tb, *tt);
+    (*nrm_op)(*tx, *tb, *tt);
     double x2 = blas::norm2(*tx);
     printfQuda("Test     x2/b2 = %16.12e/%16.12e.\n", x2, b2);
     if( comm_rank() ){
@@ -228,7 +233,7 @@ namespace quda {
 
     //    quda::pack::initConstants(*dirac_param_precondition.gauge, profile);
     double fb2 = norm2(*fb);
-    (*MdagM_precondition)(*fx, *fb, *ft);
+    (*nrm_op_precondition)(*fx, *fb, *ft);
     double fx2 = norm2(*fx);
     printfQuda("Test   fx2/fb2 = %16.12e/%16.12e.\n", fx2, fb2);
     zero_extended_color_spinor_interface( *fx, R, QUDA_CUDA_FIELD_LOCATION, 0);
@@ -263,25 +268,27 @@ namespace quda {
     blas::copy(*ip, ib);
 
     for(int local_loop_count = 0; local_loop_count < 5; local_loop_count++){
-      (*MdagM_precondition)(*immp, *ip, *itmp);
-      profile.TPSTART(QUDA_PROFILE_FREE);
+      preconditioner_timer.Start("woo", "hoo", 0);
+      (*nrm_op_precondition)(*immp, *ip, *itmp);
+      preconditioner_timer.Stop("woo", "hoo", 0);
+      
       zero_extended_color_spinor_interface( *immp, R, QUDA_CUDA_FIELD_LOCATION, 0);
-      profile.TPSTOP(QUDA_PROFILE_FREE);
       //zero_boundary_fermion(eg, mmp);
+      copier_timer.Start("woo", "hoo", 0);
       Mpk2 = reDotProduct(*ip, *immp);
+      copier_timer.Stop("woo", "hoo", 0);
 
       alpha = rk2 / Mpk2; 
 
       axpy(alpha, *ip, ix);
-      axpy(-alpha, *immp, ib);
+      rkp12 = axpyNorm(-alpha, *immp, ib);
 
-      rkp12 = blas::norm2(ib);
-
+      
       beta = rkp12 / rk2;
       rk2 = rkp12;
 
       xpay(ib, beta, *ip);
-
+      
       printfQuda("inner_cg: #%04d: r2 = %8.4e alpha = %8.4e beta = %8.4e Mpk2 = %8.4e\n",
           local_loop_count, rk2, alpha, beta, Mpk2);
     }
@@ -294,31 +301,44 @@ namespace quda {
   int MSPCG::outer_cg( ColorSpinorField& dx, ColorSpinorField& db, double quit )
   {
     double Mpk2, MdagMpk2, alpha, beta, rkp12;
-    (*MdagM)(*dr, dx, *dtmp); // r = MdagM * x
-    double rk2 = xmyNorm(db, *dr); // r = b - MdagM * x
+    precise_timer.Start("woo", "hoo", 0);
+    (*nrm_op)(*vct_dr, dx, *vct_dtmp); // r = nrm_op * x
+    precise_timer.Stop("woo", "hoo", 0);
+    double rk2 = xmyNorm(db, *vct_dr); // r = b - nrm_op * x
     
     printfQuda("outer_cg: before starting: r2 = %8.4e \n", rk2);
-    blas::copy(*dp, *dr);
-
-    for(int loop_count = 0; loop_count < param.maxiter; loop_count++){
-      (*MdagM)(*dmmp, *dp, *dtmp);
-      Mpk2 = reDotProduct(*dp, *dmmp);
+    if(rkp12 < quit){
+      printfQuda("outer_cg: CONVERGED with ZERO effort.\n");
+      return 0;
+    }
+    
+    blas::copy(*vct_dp, *vct_dr);
+    
+    int loop_count;
+    for(loop_count = 0; loop_count < param.maxiter; loop_count++){
+      
+      precise_timer.Start("woo", "hoo", 0);
+      (*nrm_op)(*vct_dmmp, *vct_dp, *vct_dtmp);
+      precise_timer.Stop("woo", "hoo", 0);
+      Mpk2 = reDotProduct(*vct_dp, *vct_dmmp);
 
       alpha = rk2 / Mpk2; 
 
-      axpy(alpha, *dp, dx);
-      axpy(-alpha, *dmmp, *dr);
+      axpy(alpha, *vct_dp, dx);
+      rkp12 = axpyNorm(-alpha, *vct_dmmp, *vct_dr);
 
-      rkp12 = blas::norm2(*dr);
-      if(rkp12 < quit) break;
+//      rkp12 = blas::norm2(*vct_dr);
       
       beta = rkp12 / rk2;
       rk2 = rkp12;
+      if(rkp12 < quit) break;
 
-      xpay(ib, beta, *dp);
+      xpay(*vct_dr, beta, *vct_dp);
 
       printfQuda("outer_cg: #%04d: r2 = %8.4e alpha = %8.4e beta = %8.4e Mpk2 = %8.4e\n", loop_count, rk2, alpha, beta, Mpk2);
     }
+    
+    printfQuda("outer_cg: CONVERGED after %04d iterations: r2/target_r2 = %8.4e/%8.4e.\n", loop_count+1, rk2, quit);
 
     return loop_count;
   }
@@ -326,36 +346,37 @@ namespace quda {
   void MSPCG::operator()(ColorSpinorField& dx, ColorSpinorField& db)
   {
 
-//    test_dslash( b ); 
+//    test_dslash( db ); 
     int parity = 0;
     Gflops = 0.;
     fGflops = 0.;
-
+    
     profile.TPSTART(QUDA_PROFILE_PREAMBLE);
     // Check to see that we're not trying to invert on a zero-field source
-    double b2 = norm2(b);
+    double b2 = norm2(db);
     if(b2 == 0.){
       profile.TPSTOP(QUDA_PROFILE_PREAMBLE);
       printfQuda("Warning: inverting on zero-field source\n");
-      x = b;
+      dx = db;
       param.true_res = 0.;
       param.true_res_hq = 0.;
     }
 
     // initializing the fermion vectors.
-    ColorSpinorParam csParam(b);
+    ColorSpinorParam csParam(db);
     csParam.create = QUDA_ZERO_FIELD_CREATE;
 
 // d* means precise
-    dr  =  new cudaColorSpinorField(csParam);
-    dp  =  new cudaColorSpinorField(csParam);
-    dmmp = new cudaColorSpinorField(csParam);
-    dtmp = new cudaColorSpinorField(csParam);
+    vct_dr  =  new cudaColorSpinorField(csParam);
+    vct_dp  =  new cudaColorSpinorField(csParam);
+    vct_dmmp = new cudaColorSpinorField(csParam);
+    vct_dtmp = new cudaColorSpinorField(csParam);
 
 // sloppy
     csParam.setPrecision(dirac_param_sloppy.gauge->Precision());
     
     r  =   new cudaColorSpinorField(csParam);
+    x  =   new cudaColorSpinorField(csParam);
     z  =   new cudaColorSpinorField(csParam);
     p  =   new cudaColorSpinorField(csParam);
     mmp  = new cudaColorSpinorField(csParam);
@@ -378,8 +399,7 @@ namespace quda {
     blas::zero(*fr);
 
     int k;
-    //    int parity = MdagM->getMatPCType();
-
+    //    int parity = nrm_op->getMatPCType();
     double alpha, beta, rkzk, pkApk, zkP1rkp1, zkrk;
 
     double stop = stopping(param.tol, b2, param.residual_type);
@@ -389,42 +409,54 @@ namespace quda {
     profile.TPSTART(QUDA_PROFILE_COMPUTE);
     // end of initializing.
 
-    for(int cycle=0; cycle<3; cycle++){
+    for(int cycle=0; cycle<5; cycle++){
       
-      (*MdagM)(*dr, dx, *dtmp); // r = MdagM * x
-      double r2 = xmyNorm(db, *dr); // r = b - MdagM * x
+      precise_timer.Start("woo", "hoo", 0);
+      (*nrm_op)(*vct_dr, dx, *vct_dtmp); // r = MdagM * x
+      precise_timer.Stop("woo", "hoo", 0);
+      double r2 = xmyNorm(db, *vct_dr); // r = b - MdagM * x
+      printfQuda("Cycle #%02d.\n", cycle);
       printfQuda("True precise residual is %8.4e\n", r2);
+      if(r2 < stop) break;
     
-      double sloppy_solver_stop = r2*param.tol*param.tol>stop ? r2*param.tol*param.tol : stop;
+      double sloppy_solver_stop = r2*param.tol*param.tol*1e4>stop ? r2*param.tol*param.tol*1e4 : stop;
 
-      blas::copy(*r, *dr); // throw true residual into the sloppy solver.
-     
+      blas::copy(*r, *vct_dr); // throw true residual into the sloppy solver.
+      blas::zero(*x);
+      copier_timer.Start("woo", "hoo", 0);
       copyExtendedColorSpinor(*fr, *r, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
+      copier_timer.Stop("woo", "hoo", 0);
       inner_cg(*fz, *fr);
+      copier_timer.Start("woo", "hoo", 0);
       copyExtendedColorSpinor(*z, *fz, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
+      copier_timer.Stop("woo", "hoo", 0);
       blas::copy(*p, *z);
 
       k = 0;
       while( k < param.maxiter ){
         rkzk = reDotProduct(*r, *z);
 
-        (*MdagM)(*mmp, *p, *tmp);
+        sloppy_timer.Start("woo", "hoo", 0);
+        (*nrm_op_sloppy)(*mmp, *p, *tmp);
+        sloppy_timer.Stop("woo", "hoo", 0);
         pkApk = reDotProduct(*p, *mmp);
         alpha = rkzk / pkApk;
 
-        axpy(alpha, *p, x); // x_k+1 = x_k + alpha * p_k
-        axpy(-alpha, *mmp, *r); // r_k+1 = r_k - alpha * Ap_k
-        double rr2 = blas::norm2(*r);
+        axpy(alpha, *p, *x); // x_k+1 = x_k + alpha * p_k
+        double rr2 = axpyNorm(-alpha, *mmp, *r); // r_k+1 = r_k - alpha * Ap_k
+//        double rr2 = blas::norm2(*r);
         if(rr2 < sloppy_solver_stop) break;
 
         // z = M^-1 r
-        profile.TPSTART(QUDA_PROFILE_FREE);
+        copier_timer.Start("woo", "hoo", 0);
         copyExtendedColorSpinor(*fr, *r, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
-        profile.TPSTOP(QUDA_PROFILE_FREE);
+        copier_timer.Stop("woo", "hoo", 0);
+        
         inner_cg(*fz, *fr);
-        profile.TPSTART(QUDA_PROFILE_FREE);
+        
+        copier_timer.Start("woo", "hoo", 0);
         copyExtendedColorSpinor(*z, *fz, QUDA_CUDA_FIELD_LOCATION, parity, NULL, NULL, NULL, NULL);
-        profile.TPSTOP(QUDA_PROFILE_FREE);
+        copier_timer.Stop("woo", "hoo", 0);
 
         zkP1rkp1 = reDotProduct(*z, *r);
         beta = zkP1rkp1 / rkzk;
@@ -438,8 +470,8 @@ namespace quda {
 
       }
 
-      blas::copy(*dtmp, *x);
-      xpy(*dtmp, dx);
+      blas::copy(*vct_dtmp, *x);
+      xpy(*vct_dtmp, dx);
 
     }
     
@@ -450,33 +482,45 @@ namespace quda {
     profile.TPSTART(QUDA_PROFILE_EPILOGUE);
 
     param.secs = profile.Last(QUDA_PROFILE_COMPUTE);
-    Gflops = MdagM->flops()*1e-9+blas::flops*1e-9;
-    fGflops = MdagM_precondition->flops()*1e-9+blas::flops*1e-9;
-    param.gflops = Gflops;
     param.iter += k;
 
-    reduceDouble(Gflops);
-    reduceDouble(fGflops);
+    double precise_tflops = nrm_op->flops()*1e-12;
+    double sloppy_tflops = nrm_op_sloppy->flops()*1e-12;
+    double preconditioner_tflops = nrm_op_precondition->flops()*1e-12;
+    reduceDouble(precise_tflops);
+    reduceDouble(sloppy_tflops);
+    reduceDouble(preconditioner_tflops);
+    param.gflops = sloppy_tflops;
+
+    double prec_time = preconditioner_timer.time; 
+    reduceMaxDouble(prec_time);
 
     if (k==param.maxiter) warningQuda("Exceeded maximum iterations %d", param.maxiter);
 
     // compute the true residual 
 
-    (*MdagM)(*dr, dx, *tmp);
-    double true_res = xmyNorm(db, *dr);
+    (*nrm_op)(*vct_dr, dx, *vct_dtmp);
+    double true_res = xmyNorm(db, *vct_dr);
     param.true_res = sqrt(true_res/b2);
 
     printfQuda("True residual/target_r2: %8.4e/%8.4e.\n", true_res, stop);
-    printfQuda("Performance outer: %8.4f TFLOPS.\n", Gflops*1e-3/param.secs);
-    printfQuda("Performance inter: %8.4f TFLOPS.\n", fGflops*1e-3/param.secs);
-    printfQuda("Performance total: %8.4f TFLOPS.\n", (Gflops+fGflops)*1e-3/param.secs);
+    printfQuda("Performance precise:        %8.4f TFLOPS in %8.4f secs with %05d calls.\n", 
+      precise_tflops/precise_timer.time, precise_timer.time, precise_timer.count);
+    printfQuda("Performance sloppy:         %8.4f TFLOPS in %8.4f secs with %05d calls.\n", 
+      sloppy_tflops/sloppy_timer.time, sloppy_timer.time, sloppy_timer.count);
+    printfQuda("Performance preconditioner: %8.4f TFLOPS in %8.4f secs with %05d calls.\n", 
+      preconditioner_tflops/prec_time, prec_time, preconditioner_timer.count);
+    printfQuda("Performance copier:                         in %8.4f secs with %05d calls.\n",
+      copier_timer.time, copier_timer.count);
 
     // reset the flops counters
     blas::flops = 0;
 
     profile.TPSTOP(QUDA_PROFILE_EPILOGUE);
 
+    profile.TPSTART(QUDA_PROFILE_FREE);
     delete r;
+    delete x;
     delete z;
     delete p;
     delete mmp;
@@ -489,10 +533,11 @@ namespace quda {
     delete ip;
     delete itmp;
 
-    delete dr;
-    delete dp;
-    delete dmmp;
-    delete dtmp;
+    delete vct_dr;
+    delete vct_dp;
+    delete vct_dmmp;
+    delete vct_dtmp;
+    profile.TPSTOP(QUDA_PROFILE_FREE);
 
     return;
   }
