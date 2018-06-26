@@ -40,7 +40,8 @@ target_link_libraries(invert_test ${TEST_LIBS} ${MPI_LIBRARIES} ${CUDA_LIBRARIES
 #target_link_libraries(invert_test ${TEST_LIBS} ${CUDA_LIBRARIES} cuda)
 QUDA_CHECKBUILDTEST(invert_test QUDA_BUILD_ALL_TESTS)
 
-cuda_add_executable(mspcg.x mspcg.cc main.cc wilson_dslash_reference.cpp domain_wall_dslash_reference.cpp clover_reference.cpp blas_reference.cpp)
+#cuda_add_executable(mspcg.x mspcg.cc main.cc wilson_dslash_reference.cpp domain_wall_dslash_reference.cpp clover_reference.cpp blas_reference.cpp)
+cuda_add_executable(mspcg.x main.cc wilson_dslash_reference.cpp domain_wall_dslash_reference.cpp clover_reference.cpp blas_reference.cpp)
 target_link_libraries(mspcg.x ${TEST_LIBS} ${MPI_LIBRARIES} ${CUDA_LIBRARIES} cuda quda )
 #target_link_libraries(invert_test ${TEST_LIBS} ${CUDA_LIBRARIES} cuda)
 QUDA_CHECKBUILDTEST(mspcg.x QUDA_BUILD_ALL_TESTS)

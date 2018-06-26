@@ -25,9 +25,11 @@
 // In a typical application, quda.h is the only QUDA header required.
 #include <quda.h>
 
-#include <mspcg.h>
+#include <inv_mspcg.h>
 
-//#include <qlat/qlat.h>
+#include <qlat/qlat.h>
+
+#include <gauge_tools.h>
 
 // Wilson, clover-improved Wilson, twisted mass, and domain wall are supported.
 extern QudaDslashType dslash_type;
@@ -204,7 +206,7 @@ void invert_MSPCG(void *hp_x, void *hp_b, QudaInvertParam *param)
 
   SolverParam solverParam(*param);
 
-  MSPCG* mspcg = new MSPCG(param, solverParam, profileInvert);
+  MSPCG* mspcg = new MSPCG(param, solverParam, profileInvert, 6);
   (*mspcg)(*out, *in);
   solverParam.updateInvertParam(*param);
   delete mspcg;
@@ -266,15 +268,26 @@ int main(int argc, char **argv)
   display_test_info();
 
 // qlat initialization
-//	qlat::Coordinate node_coor( commCoords(0), commCoords(1), commCoords(2), commCoords(3) );
-//	qlat::Coordinate node_size( commDim(0), commDim(1), commDim(2), commDim(3) );
-//	qlat::begin(qlat::index_from_coordinate(node_coor, node_size), node_size);
-//	printf("Node #%03d(quda):%02dx%02dx%02dx%02d/#%03d(qlat):%02dx%02dx%02dx%02d.\n", comm_rank(), 
-//				commCoords(0), commCoords(1), commCoords(2), commCoords(3), 
-//				qlat::get_id_node(), qlat::get_coor_node()[0], qlat::get_coor_node()[1], qlat::get_coor_node()[2], qlat::get_coor_node()[3]);
+	printf("Node #%03d(quda):%02dx%02dx%02dx%02d.\n", comm_rank(), commCoords(0), commCoords(1), commCoords(2), commCoords(3) ); 
+  qlat::Coordinate node_coor( commCoords(0), commCoords(1), commCoords(2), commCoords(3) );
+	qlat::Coordinate node_size( commDim(0), commDim(1), commDim(2), commDim(3) );
+	qlat::begin(qlat::index_from_coordinate(node_coor, node_size), node_size);
+//	qlat::begin(comm_rank(), node_size);
+//	qlat::begin_comm(MPI_COMM_WORLD, node_size);
+	printf("Node #%03d(quda):%02dx%02dx%02dx%02d/#%03d(qlat):%02dx%02dx%02dx%02d.\n", comm_rank(), 
+				commCoords(0), commCoords(1), commCoords(2), commCoords(3), 
+				qlat::get_id_node(), qlat::get_coor_node()[0], qlat::get_coor_node()[1], qlat::get_coor_node()[2], qlat::get_coor_node()[3]);
 // END qlat initialization
 
+  const qlat::Coordinate lattice_size(xdim*commDim(0), ydim*commDim(1), zdim*commDim(2), tdim*commDim(3));
+  qlat::Geometry geo; geo.init(lattice_size, 1);
+  qlat::GaugeField gf; gf.init(geo);
+  qlat::load_gauge_field(gf, "/home/jiquntu/configurations/32x64x12ID_b1.75_mh0.045_ml0.0001/ckpoint_lat.160");
 
+//  qlat::set_unit(gf);
+
+  gf_show_info(gf);
+  
   // *** QUDA parameters begin here.
 
   QudaPrecision cpu_prec = QUDA_DOUBLE_PRECISION;
@@ -293,9 +306,11 @@ int main(int argc, char **argv)
   gauge_param.X[3] = tdim;
   inv_param.Ls = 1;
 
-  gauge_param.anisotropy = anisotropy;
+//  gauge_param.anisotropy = anisotropy;
+  gauge_param.anisotropy = 1.;
   gauge_param.type = QUDA_WILSON_LINKS;
-  gauge_param.gauge_order = QUDA_QDP_GAUGE_ORDER;
+  //gauge_param.gauge_order = QUDA_QDP_GAUGE_ORDER;
+  gauge_param.gauge_order = QUDA_CPS_WILSON_GAUGE_ORDER;
   gauge_param.t_boundary = QUDA_PERIODIC_T;
 
   gauge_param.cpu_prec = cpu_prec;
@@ -313,7 +328,7 @@ int main(int argc, char **argv)
   inv_param.mu = mu;
   inv_param.kappa = 1.0 / (2.0 * (1 + 3/gauge_param.anisotropy + mass));
 
-  if ( dslash_type != QUDA_MOBIUS_DWF_DSLASH ) printfQuda("ERROR: NOR Mobius?\n");
+  if ( dslash_type != QUDA_MOBIUS_DWF_DSLASH ) printfQuda("ERROR: NOT Mobius?\n");
 
   inv_param.m5 = -1.8;
   kappa5 = 0.5/(5 + inv_param.m5);  
@@ -417,15 +432,37 @@ int main(int argc, char **argv)
 
   void *gauge[4], *clover=0, *clover_inv=0;
 
-  for (int dir = 0; dir < 4; dir++) {
-    gauge[dir] = malloc(V*gaugeSiteSize*gSize);
-  }
+//  if (strcmp(latfile,"")) {  // load in the command line supplied gauge field
+//    read_gauge_field(latfile, gauge, gauge_param.cpu_prec, gauge_param.X, argc, argv);
+//    construct_gauge_field(gauge, 2, gauge_param.cpu_prec, &gauge_param);
+//  } else { // else generate a random SU(3) field
+//    construct_gauge_field(gauge, 0, gauge_param.cpu_prec, &gauge_param);
+//  }
+  
 
-  if (strcmp(latfile,"")) {  // load in the command line supplied gauge field
-    read_gauge_field(latfile, gauge, gauge_param.cpu_prec, gauge_param.X, argc, argv);
-    construct_gauge_field(gauge, 2, gauge_param.cpu_prec, &gauge_param);
-  } else { // else generate a random SU(3) field
-    construct_gauge_field(gauge, 1, gauge_param.cpu_prec, &gauge_param);
+//  printfQuda("Vh = %06d.\n", Vh);
+//  for (int dir = 0; dir < 4; dir++) {
+//    gauge[dir] = malloc(V*gaugeSiteSize*gSize);
+//  }
+//  construct_gauge_field(gauge, 1, gauge_param.cpu_prec, &gauge_param);
+
+  double* cps_gauge;
+  cps_gauge = (double*)malloc(4*V*gaugeSiteSize*gSize);
+
+  qlat::Coordinate local_lattice_size( xdim, ydim, zdim, tdim );
+  qlat::Coordinate local_lattice_size_cb( xdim/2, ydim, zdim, tdim );
+  for (int dir = 0; dir < 4; dir++) {
+    for(int qlat_idx = 0; qlat_idx < V; qlat_idx++){
+      qlat::Coordinate Y = qlat::coordinate_from_index(qlat_idx, local_lattice_size);
+      int eo = (Y[0]+Y[1]+Y[2]+Y[3])%2;
+      int quda_idx = qlat_idx/2 + eo*Vh;
+      double* from_p = (double*)(gf.field.data());
+      for(int row = 0; row < 3; row++){
+      for(int col = 0; col < 3; col++){
+      for(int com = 0; com < 2; com++){
+        cps_gauge[(quda_idx*4+dir)*(18)+col*(6)+row*(2)+com] = from_p[(qlat_idx*4+dir)*(18)+row*(6)+col*(2)+com];
+      }}}
+    }
   }
 
   void *spinorIn = malloc(V*spinorSiteSize*sSize*inv_param.Ls);
@@ -456,7 +493,12 @@ int main(int argc, char **argv)
   initQuda(device);
 
   // load the gauge field
-  loadGaugeQuda((void*)gauge, &gauge_param);
+//  loadGaugeQuda((void*)gauge, &gauge_param);
+  loadGaugeQuda((void*)cps_gauge, &gauge_param);
+
+  double plaq[3];
+  plaqQuda(plaq);
+  printfQuda( "gaugePrecise plaquette = %16.12e\n", plaq[0] );
 
   // perform the inversion
   invert_MSPCG(spinorOut, spinorIn, &inv_param);
